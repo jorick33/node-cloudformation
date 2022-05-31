@@ -1,86 +1,86 @@
 ---
   AWSTemplateFormatVersion: 2010-09-09
-  
+
   Description: >
     This template creates an automated continuous deployment pipeline to Amazon Elastic Container Service (ECS)
     Created by Luke Youngblood, luke@blockscale.net
-  
+
   Parameters:
-  
+
   # GitHub Parameters
-  
+
     GitHubUser:
       Type: String
       Default: jorick33
       Description: Your team or username on GitHub.
-  
+
     NodeGitHubRepo:
       Type: String
       Default: node-docker
       Description: The repo name of the node service.
-  
+
     NodeGitHubBranch:
       Type: String
       Default: testnet
       Description: The branch of the node repo to continuously deploy.
-  
+
     GitHubToken:
       Type: String
       NoEcho: true
       Description: >
         Token for the team or user specified above. (https://github.com/settings/tokens)
-  
+
   # VPC Parameters
-  
+
     VPC:
       Type: AWS::EC2::VPC::Id
-  
+
     Subnets:
       Type: List<AWS::EC2::Subnet::Id>
-  
+
     VpcCIDR:
       Type: String
       Default: 10.100.0.0/16
-  
+
   # ECS Parameters
-  
+
     InstanceType:
       Type: String
       Default: i3.xlarge
-  
+
     KeyPair:
       Type: AWS::EC2::KeyPair::KeyName
-  
+
     SpotPrice:
       Type: Number
       Default: 0.172
-  
+
     ClusterSize:
       Type: Number
       Default: 2
-  
+
     NodeDesiredCount:
       Type: Number
       Default: 0
-  
+
     NodeTaskName:
       Type: String
       Default: tezos-node
-  
+
     ECSAMI:
       Type: AWS::SSM::Parameter::Value<String>
       Default: /aws/service/ecs/optimized-ami/amazon-linux/recommended/image_id
-  
+
   # Tezos Parameters
-  
+
     RpcPort:
       Type: Number
       Default: 8732
-  
+
     NetPort:
       Type: Number
       Default: 9732
-  
+
     Network:
       Type: String
       Default: delphinet
@@ -92,9 +92,9 @@
     Connections:
       Type: Number
       Default: 40
-  
+
   Metadata:
-  
+
     AWS::CloudFormation::Interface:
       ParameterLabels:
         GitHubUser:
@@ -164,11 +164,11 @@
             - NetPort
             - Network
             - Connections
-  
+
   # Mappings
-  
+
   Mappings:
-  
+
     RegionMap:
       eu-west-1:
         mainnet: mainnet-updater-chainbucket-vwnool266emk
@@ -186,16 +186,18 @@
         mainnet: mainnet-updater-chainbucket-1eq4z7ed2l45s
       us-east-2:
         mainnet: tezos-updater-oh-chainbucket-xq1wyfczcekl
-  
+      eu-west-3:
+        mainnet: mainnet-updater-chainbucket-3sr0giugiacf
+
   Resources:
-  
+
   # ECS Resources
-  
+
     Cluster:
       Type: AWS::ECS::Cluster
       Properties:
         ClusterName: !Ref AWS::StackName
-  
+
     SecurityGroup:
       Type: "AWS::EC2::SecurityGroup"
       Properties:
@@ -218,7 +220,7 @@
             FromPort: !Ref NetPort
             ToPort: !Ref NetPort
             CidrIpv6: ::/0
-  
+
     ECSAutoScalingGroup:
       Type: AWS::AutoScaling::AutoScalingGroup
       Properties:
@@ -246,7 +248,7 @@
             - AlarmNotification
             - ScheduledActions
           WaitOnResourceSignals: true
-  
+
     ECSLaunchConfiguration:
       Type: AWS::AutoScaling::LaunchConfiguration
       Properties:
@@ -266,24 +268,24 @@
             yum install -y aws-cfn-bootstrap hibagent
             yum update -y
             restart amazon-ssm-agent
-  
+
             drives=`find /dev -regextype posix-egrep -regex '.*/(sd[b-z]|xvd[b-z]|nvme[0-9]n1)'`
             ephemeral_count=`find /dev -regextype posix-egrep -regex '.*/(sd[b-z]|xvd[b-z]|nvme[0-9]n1)'|wc -l`
             mount_point=/var/lib/docker
             yum -y -d0 install mdadm curl rsync
-  
+
             # copy existing files from mount point
             service docker stop
             echo 'DOCKER_STORAGE_OPTIONS="--storage-driver overlay2"' > /etc/sysconfig/docker-storage
             mkdir -p /tmp$mount_point
             rsync -val $mount_point/ /tmp/$mount_point/
             umount $mount_point
-  
+
             # overwrite first few blocks in case there is a filesystem, otherwise mdadm will prompt for input
             for drive in $drives; do
               dd if=/dev/zero of=$drive bs=4096 count=1024
             done
-  
+
             partprobe
             mdadm --create --force --verbose /dev/md0 --level=0 -c256 --raid-devices=$ephemeral_count $drives
             echo DEVICE $drives | tee /etc/mdadm.conf
@@ -291,39 +293,39 @@
             blockdev --setra 65536 /dev/md0
             mkfs -t ext4 /dev/md0
             mkdir -p $mount_point
-  
+
             mount -t ext4 -o noatime /dev/md0 $mount_point
-  
+
             # Copy files back to new mount point
             rsync -val /tmp/$mount_point/ $mount_point/
             rm -rf /tmp$mount_point
             service docker start
-  
+
             # Make raid appear on reboot
             echo "/dev/md0 $mount_point ext4 noatime 0 0" | tee -a /etc/fstab
-  
+
             /opt/aws/bin/cfn-init -v --region ${AWS::Region} --stack ${AWS::StackName} --resource ECSLaunchConfiguration
             /opt/aws/bin/cfn-signal -e $? --region ${AWS::Region} --stack ${AWS::StackName} --resource ECSAutoScalingGroup
             /usr/bin/enable-ec2-spot-hibernation
-  
+
             # Attach an EIP from the pool of available EIPs in scope "vpc"
             alloc=`aws ec2 describe-addresses --region ${AWS::Region} --output text | grep -v eni | head -1 | cut -f 2`
             instanceid=`curl 169.254.169.254/latest/meta-data/instance-id`
             aws ec2 associate-address --region ${AWS::Region} --allocation-id $alloc --instance-id $instanceid
-  
+
             # If there was a kernel update applied, reboot
             if [ `rpm -q kernel|wc -l` -gt 1 ]
             then
               reboot
             fi
-  
+
       Metadata:
         AWS::CloudFormation::Init:
           config:
             packages:
               yum:
                 awslogs: []
-  
+
             commands:
               01_add_instance_to_cluster:
                 command: !Sub echo ECS_CLUSTER=${Cluster} >> /etc/ecs/ecs.config
@@ -336,61 +338,61 @@
                   [main]
                   stack=${AWS::StackId}
                   region=${AWS::Region}
-  
+
               "/etc/cfn/hooks.d/cfn-auto-reloader.conf":
                 content: !Sub |
                   [cfn-auto-reloader-hook]
                   triggers=post.update
                   path=Resources.ECSLaunchConfiguration.Metadata.AWS::CloudFormation::Init
                   action=/opt/aws/bin/cfn-init -v --region ${AWS::Region} --stack ${AWS::StackName} --resource ECSLaunchConfiguration
-  
+
               "/etc/awslogs/awscli.conf":
                 content: !Sub |
                   [plugins]
                   cwlogs = cwlogs
                   [default]
                   region = ${AWS::Region}
-  
+
               "/etc/awslogs/awslogs.conf":
                 content: !Sub |
                   [general]
                   state_file = /var/lib/awslogs/agent-state
-  
+
                   [/var/log/dmesg]
                   file = /var/log/dmesg
                   log_group_name = ${Cluster}-/var/log/dmesg
                   log_stream_name = ${Cluster}
-  
+
                   [/var/log/messages]
                   file = /var/log/messages
                   log_group_name = ${Cluster}-/var/log/messages
                   log_stream_name = ${Cluster}
                   datetime_format = %b %d %H:%M:%S
-  
+
                   [/var/log/docker]
                   file = /var/log/docker
                   log_group_name = ${Cluster}-/var/log/docker
                   log_stream_name = ${Cluster}
                   datetime_format = %Y-%m-%dT%H:%M:%S.%f
-  
+
                   [/var/log/ecs/ecs-init.log]
                   file = /var/log/ecs/ecs-init.log.*
                   log_group_name = ${Cluster}-/var/log/ecs/ecs-init.log
                   log_stream_name = ${Cluster}
                   datetime_format = %Y-%m-%dT%H:%M:%SZ
-  
+
                   [/var/log/ecs/ecs-agent.log]
                   file = /var/log/ecs/ecs-agent.log.*
                   log_group_name = ${Cluster}-/var/log/ecs/ecs-agent.log
                   log_stream_name = ${Cluster}
                   datetime_format = %Y-%m-%dT%H:%M:%SZ
-  
+
                   [/var/log/ecs/audit.log]
                   file = /var/log/ecs/audit.log.*
                   log_group_name = ${Cluster}-/var/log/ecs/audit.log
                   log_stream_name = ${Cluster}
                   datetime_format = %Y-%m-%dT%H:%M:%SZ
-  
+
             services:
               sysvinit:
                 cfn-hup:
@@ -405,7 +407,7 @@
                   files:
                     - /etc/awslogs/awslogs.conf
                     - /etc/awslogs/awscli.conf
-  
+
     NodeLoadBalancer:
       Type: AWS::ElasticLoadBalancingV2::LoadBalancer
       Properties:
@@ -413,10 +415,10 @@
         Type: network
         Scheme: internet-facing
         Subnets: !Ref Subnets
-        Tags: 
+        Tags:
           - Key: Name
             Value: !Sub ${AWS::StackName}-NLB
-  
+
     NodeTargetGroup:
       Type: AWS::ElasticLoadBalancingV2::TargetGroup
       DependsOn: NodeLoadBalancer
@@ -427,24 +429,24 @@
         TargetGroupAttributes:
           - Key: deregistration_delay.timeout_seconds
             Value: 120
-  
+
     NodeListener:
       Type: AWS::ElasticLoadBalancingV2::Listener
-      Properties: 
+      Properties:
         DefaultActions:
           - Type: forward
             TargetGroupArn: !Ref NodeTargetGroup
         LoadBalancerArn: !Ref NodeLoadBalancer
         Port: !Ref RpcPort
         Protocol: TCP
-  
+
     # This IAM Role is attached to all of the ECS hosts. It is based on the default role
     # published here:
     # http://docs.aws.amazon.com/AmazonECS/latest/developerguide/instance_IAM_role.html
     #
     # You can add other IAM policy statements here to allow access from your ECS hosts
     # to other AWS services.
-  
+
     ECSRole:
       Type: AWS::IAM::Role
       Properties:
@@ -525,14 +527,14 @@
                   "Resource": "*"
                 }]
               }
-  
+
     ECSInstanceProfile:
       Type: AWS::IAM::InstanceProfile
       Properties:
         Path: /
         Roles:
           - !Ref ECSRole
-  
+
     ECSServiceAutoScalingRole:
       Type: AWS::IAM::Role
       Properties:
@@ -558,7 +560,7 @@
                 - ecs:DescribeServices
                 - ecs:UpdateService
                 Resource: "*"
-  
+
     NodeTaskExecutionRole:
       Type: AWS::IAM::Role
       Properties:
@@ -591,13 +593,13 @@
                           - RegionMap
                           - !Ref 'AWS::Region'
                           - !Ref Network
-  
+
     NodeLogGroup:
       Type: AWS::Logs::LogGroup
       Properties:
         LogGroupName: !Sub /ecs/${AWS::StackName}-node
         RetentionInDays: 14
-  
+
     NodeECSService:
       Type: AWS::ECS::Service
       DependsOn: NodeListener
@@ -610,11 +612,11 @@
         DeploymentConfiguration:
           MaximumPercent: 133
           MinimumHealthyPercent: 66
-        LoadBalancers: 
+        LoadBalancers:
           - ContainerName: !Ref NodeTaskName
             ContainerPort: !Ref RpcPort
             TargetGroupArn: !Ref NodeTargetGroup
-  
+
     NodeTaskDefinition:
       Type: AWS::ECS::TaskDefinition
       Properties:
@@ -663,12 +665,12 @@
               Timeout: 60
               Retries: 10
               StartPeriod: 300
-  
+
   # CodePipeline Resources
-  
+
     NodeRepository:
       Type: AWS::ECR::Repository
-  
+
     NodeCodeBuildServiceRole:
       Type: AWS::IAM::Role
       Properties:
@@ -708,7 +710,7 @@
                     - ecr:InitiateLayerUpload
                     - ecr:UploadLayerPart
                     - ecr:CompleteLayerUpload
-  
+
     NodeCodePipelineServiceRole:
       Type: AWS::IAM::Role
       Properties:
@@ -745,10 +747,10 @@
                     - codebuild:StartBuild
                     - codebuild:BatchGetBuilds
                     - iam:PassRole
-  
+
     NodeArtifactBucket:
       Type: AWS::S3::Bucket
-  
+
     NodeCodeBuildProject:
       Type: AWS::CodeBuild::Project
       Properties:
@@ -786,7 +788,7 @@
               Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${NodeRepository}
         Name: !Sub ${AWS::StackName}-node
         ServiceRole: !Ref NodeCodeBuildServiceRole
-  
+
     NodePipeline:
       Type: AWS::CodePipeline::Pipeline
       Properties:
@@ -841,7 +843,7 @@
                 InputArtifacts:
                   - Name: BuildOutput
                 RunOrder: 1
-  
+
   Outputs:
     ClusterName:
         Value: !Ref Cluster
@@ -854,4 +856,4 @@
     NodeServiceUrl:
       Description: URL of the load balancer for the node service.
       Value: !Sub http://${NodeLoadBalancer.DNSName}
-  
+

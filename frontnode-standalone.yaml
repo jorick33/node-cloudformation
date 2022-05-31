@@ -175,7 +175,7 @@
         delphinet: alphanet-updater-chainbucket-1v6go885nadpa
         edo2net: zeronet-updater-chainbucket-kmmayerx0l8v
       eu-west-3:
-        mainnet: tezos-updater-chainbucket-14534hslq2f1z
+        mainnet: tezos-mainnet-updater-chainbucket-u48pexgvvv8b
       eu-central-1:
         mainnet: mainnet-updater-snapshot-chainbucket-pq4rbmykvmc5
       ap-southeast-1:
@@ -186,8 +186,6 @@
         mainnet: mainnet-updater-chainbucket-1eq4z7ed2l45s
       us-east-2:
         mainnet: tezos-updater-oh-chainbucket-xq1wyfczcekl
-      eu-west-3:
-        mainnet: mainnet-updater-chainbucket-3sr0giugiacf
 
   Resources:
 
